@@ -69,7 +69,7 @@ RV3028::RV3028(void)
 
 }
 
-bool RV3028::begin(TwoWire &wirePort, bool set_24Hour, bool disable_TrickleCharge, bool set_LevelSwitchingMode, bool reset_Status)
+bool RV3028::begin(TwoWire &wirePort, bool set_24Hour, bool disable_TrickleCharge, bool set_LevelSwitchingMode)
 {
 	//We require caller to begin their I2C port, with the speed of their choice
 	//external to the library
@@ -80,7 +80,7 @@ bool RV3028::begin(TwoWire &wirePort, bool set_24Hour, bool disable_TrickleCharg
 	if (set_24Hour) { set24Hour(); delay(1); }
 	if (disable_TrickleCharge) { disableTrickleCharge(); delay(1); }
 
-	return((set_LevelSwitchingMode ? setBackupSwitchoverMode(3) : true) && (reset_Status ? writeRegister(RV3028_STATUS, 0x00) : true));
+	return((set_LevelSwitchingMode ? setBackupSwitchoverMode(3) : true) && writeRegister(RV3028_STATUS, 0x00));
 }
 
 bool RV3028::setTime(uint8_t sec, uint8_t min, uint8_t hour, uint8_t weekday, uint8_t date, uint8_t month, uint16_t year)
@@ -204,6 +204,52 @@ bool RV3028::setToCompilerTime()
 	return setTime(_time, TIME_ARRAY_LENGTH);
 }
 
+void RV3028::getCompilerTime(uint8_t &seconds, uint8_t &minutes, uint8_t &hours, uint8_t &weekday, uint8_t &day_of_month, uint8_t &month, uint8_t &year)
+{
+	seconds = DECtoBCD(BUILD_SECOND);
+	minutes = DECtoBCD(BUILD_MINUTE);
+	hours = DECtoBCD(BUILD_HOUR);
+
+	//Build_Hour is 0-23, convert to 1-12 if needed
+	if (is12Hour())
+	{
+		uint8_t hour = BUILD_HOUR;
+		bool pm = false;
+
+		if (hour == 0)
+        {
+            hour += 12;
+        }
+		else if (hour == 12)
+        {
+            pm = true;
+        }
+		else if (hour > 12)
+		{
+			hour -= 12;
+			pm = true;
+		}
+
+		hours = DECtoBCD(hour); //Load the modified hours
+		if (pm == true) 
+        {
+            hours |= (1 << HOURS_AM_PM); //Set AM/PM bit if needed
+        }
+	}
+
+	// Calculate weekday (from here: http://stackoverflow.com/a/21235587)
+	// 0 = Sunday, 6 = Saturday
+	uint16_t d = BUILD_DATE;
+	uint16_t m = BUILD_MONTH;
+	uint16_t y = BUILD_YEAR;
+	uint16_t weekday_temp = (d += m < 3 ? y-- : y - 2, 23 * m / 9 + d + 4 + y / 4 - y / 100 + y / 400) % 7 + 1;
+	weekday = DECtoBCD(weekday_temp);
+
+	day_of_month = DECtoBCD(BUILD_DATE);
+	month = DECtoBCD(BUILD_MONTH);
+	year = DECtoBCD(BUILD_YEAR - 2000); //! Not Y2K (or Y2.1K)-proof :(
+}
+
 //Move the hours, mins, sec, etc registers from RV-3028-C7 into the _time array
 //Needs to be called before printing time or date
 //We do not protect the GPx registers. They will be overwritten. The user has plenty of RAM if they need it.
@@ -221,7 +267,7 @@ bool RV3028::updateTime()
 char* RV3028::stringDateUSA()
 {
 	static char date[11]; //Max of mm/dd/yyyy with \0 terminator
-	sprintf(date, "%02hhu/%02hhu/20%02hhu", BCDtoDEC(_time[TIME_MONTH]), BCDtoDEC(_time[TIME_DATE]), BCDtoDEC(_time[TIME_YEAR]));
+	sprintf(date, "%02d/%02d/20%02d", BCDtoDEC(_time[TIME_MONTH]), BCDtoDEC(_time[TIME_DATE]), BCDtoDEC(_time[TIME_YEAR]));
 	return(date);
 }
 
@@ -229,7 +275,7 @@ char* RV3028::stringDateUSA()
 char*  RV3028::stringDate()
 {
 	static char date[11]; //Max of dd/mm/yyyy with \0 terminator
-	sprintf(date, "%02hhu/%02hhu/20%02hhu", BCDtoDEC(_time[TIME_DATE]), BCDtoDEC(_time[TIME_MONTH]), BCDtoDEC(_time[TIME_YEAR]));
+	sprintf(date, "%02d/%02d/20%02d", BCDtoDEC(_time[TIME_DATE]), BCDtoDEC(_time[TIME_MONTH]), BCDtoDEC(_time[TIME_YEAR]));
 	return(date);
 }
 
@@ -244,10 +290,10 @@ char* RV3028::stringTime()
 		char half = 'A';
 		if (isPM()) half = 'P';
 
-		sprintf(time, "%02hhu:%02hhu:%02hhu%cM", BCDtoDEC(_time[TIME_HOURS]), BCDtoDEC(_time[TIME_MINUTES]), BCDtoDEC(_time[TIME_SECONDS]), half);
+		sprintf(time, "%02d:%02d:%02d%cM", BCDtoDEC(_time[TIME_HOURS]), BCDtoDEC(_time[TIME_MINUTES]), BCDtoDEC(_time[TIME_SECONDS]), half);
 	}
 	else
-		sprintf(time, "%02hhu:%02hhu:%02hhu", BCDtoDEC(_time[TIME_HOURS]), BCDtoDEC(_time[TIME_MINUTES]), BCDtoDEC(_time[TIME_SECONDS]));
+		sprintf(time, "%02d:%02d:%02d", BCDtoDEC(_time[TIME_HOURS]), BCDtoDEC(_time[TIME_MINUTES]), BCDtoDEC(_time[TIME_SECONDS]));
 
 	return(time);
 }
@@ -261,10 +307,10 @@ char* RV3028::stringTimeStamp()
 		char half = 'A';
 		if (isPM()) half = 'P';
 
-		sprintf(timeStamp, "20%02hhu-%02hhu-%02hhu  %02hhu:%02hhu:%02hhu%cM", BCDtoDEC(_time[TIME_YEAR]), BCDtoDEC(_time[TIME_MONTH]), BCDtoDEC(_time[TIME_DATE]), BCDtoDEC(_time[TIME_HOURS]), BCDtoDEC(_time[TIME_MINUTES]), BCDtoDEC(_time[TIME_SECONDS]), half);
+		sprintf(timeStamp, "20%02d-%02d-%02d  %02d:%02d:%02d%cM", BCDtoDEC(_time[TIME_YEAR]), BCDtoDEC(_time[TIME_MONTH]), BCDtoDEC(_time[TIME_DATE]), BCDtoDEC(_time[TIME_HOURS]), BCDtoDEC(_time[TIME_MINUTES]), BCDtoDEC(_time[TIME_SECONDS]), half);
 	}
 	else
-		sprintf(timeStamp, "20%02hhu-%02hhu-%02hhu  %02hhu:%02hhu:%02hhu", BCDtoDEC(_time[TIME_YEAR]), BCDtoDEC(_time[TIME_MONTH]), BCDtoDEC(_time[TIME_DATE]), BCDtoDEC(_time[TIME_HOURS]), BCDtoDEC(_time[TIME_MINUTES]), BCDtoDEC(_time[TIME_SECONDS]));
+		sprintf(timeStamp, "20%02d-%02d-%02d  %02d:%02d:%02d", BCDtoDEC(_time[TIME_YEAR]), BCDtoDEC(_time[TIME_MONTH]), BCDtoDEC(_time[TIME_DATE]), BCDtoDEC(_time[TIME_HOURS]), BCDtoDEC(_time[TIME_MINUTES]), BCDtoDEC(_time[TIME_SECONDS]));
 
 	return(timeStamp);
 }
@@ -656,7 +702,11 @@ void RV3028::disableTrickleCharge()
 *********************************/
 bool RV3028::setBackupSwitchoverMode(uint8_t val)
 {
-	if (val > 3)return false;
+	if (val > 3)
+    {
+        return false;
+    }
+    
 	bool success = true;
 
 	//Read EEPROM Backup Register (0x37)
@@ -861,57 +911,6 @@ uint8_t RV3028::readConfigEEPROM_RAMmirror(uint8_t eepromaddr)
 	return eepromdata;
 }
 
-bool RV3028::writeUserEEPROM(uint8_t eepromaddr, uint8_t val)
-{
-	bool success = waitforEEPROM();
-
-	//Disable auto refresh by writing 1 to EERD control bit in CTRL1 register
-	uint8_t ctrl1 = readRegister(RV3028_CTRL1);
-	ctrl1 |= 1 << CTRL1_EERD;
-	if (!writeRegister(RV3028_CTRL1, ctrl1)) success = false;
-	//Write addr to EEADDR
-	writeRegister(0x25, eepromaddr);
-	//Write value to EEDATA
-	writeRegister(0x26, val);
-	//Update EEPROM (All Configuration RAM -> EEPROM)
-	writeRegister(RV3028_EEPROM_CMD, EEPROMCMD_First);
-	writeRegister(RV3028_EEPROM_CMD, EEPROMCMD_WriteSingle);
-	if (!waitforEEPROM()) success = false;
-	//Reenable auto refresh by writing 0 to EERD control bit in CTRL1 register
-	ctrl1 = readRegister(RV3028_CTRL1);
-	if (ctrl1 == 0x00)success = false;
-	ctrl1 &= ~(1 << CTRL1_EERD);
-	writeRegister(RV3028_CTRL1, ctrl1);
-	if (!waitforEEPROM()) success = false;
-
-	return success;
-}
-
-uint8_t RV3028::readUserEEPROM(uint8_t eepromaddr)
-{
-	bool success = waitforEEPROM();
-
-	//Disable auto refresh by writing 1 to EERD control bit in CTRL1 register
-	uint8_t ctrl1 = readRegister(RV3028_CTRL1);
-	ctrl1 |= 1 << CTRL1_EERD;
-	if (!writeRegister(RV3028_CTRL1, ctrl1)) success = false;
-	//Read EEPROM Register
-	writeRegister(RV3028_EEPROM_ADDR, eepromaddr);
-	writeRegister(RV3028_EEPROM_CMD, EEPROMCMD_First);
-	writeRegister(RV3028_EEPROM_CMD, EEPROMCMD_ReadSingle);
-	if (!waitforEEPROM()) success = false;
-	uint8_t eepromdata = readRegister(RV3028_EEPROM_DATA);
-	if (!waitforEEPROM()) success = false;
-	//Reenable auto refresh by writing 0 to EERD control bit in CTRL1 register
-	ctrl1 = readRegister(RV3028_CTRL1);
-	if (ctrl1 == 0x00)success = false;
-	ctrl1 &= ~(1 << CTRL1_EERD);
-	writeRegister(RV3028_CTRL1, ctrl1);
-
-	if (!success) return 0xFF;
-	return eepromdata;
-}
-
 //True if success, false if timeout occured
 bool RV3028::waitforEEPROM()
 {
@@ -926,6 +925,118 @@ void RV3028::reset()
 	setBit(RV3028_CTRL2, CTRL2_RESET);
 }
 
+bool RV3028::writeSingleByteToUserEEPROM(uint8_t eeprom_address, uint8_t val)
+{
+    //Make sure that the eeprom address requested by the user falls within the user eeprom
+    //according to the datasheet (section 3.16 of the datasehet, titled "USER EEPROM")
+    if (eeprom_address > RV3028_MAX_USER_EEPROM_ADDR)
+    {
+        return false;
+    }
+
+	bool success = waitforEEPROM();
+
+	//Disable auto refresh by writing 1 to EERD control bit in CTRL1 register
+	uint8_t ctrl1 = readRegister(RV3028_CTRL1);
+	ctrl1 |= 1 << CTRL1_EERD;
+	if (!writeRegister(RV3028_CTRL1, ctrl1)) 
+    {
+        success = false;
+    }
+
+	//Write the address that we want to write to into the EEADDR register
+    writeRegister(RV3028_EEPROM_ADDR, eeprom_address);
+
+    //Write the data to-be-written into the EEDATA register
+    writeRegister(RV3028_EEPROM_DATA, val);
+
+    //Write command 0x00 to the EECMD register
+    writeRegister(RV3028_EEPROM_CMD, EEPROMCMD_First);
+
+    //Write command 0x21 to the EECMD register
+    writeRegister(RV3028_EEPROM_CMD, EEPROMCMD_WriteSingle);
+
+    //Wait for the command to finish (according to section 4.6.5 of the datasheet, it takes ~16 ms)
+	if (!waitforEEPROM()) 
+    {
+        success = false;
+    }
+
+	//Reenable auto refresh by writing 0 to EERD control bit in CTRL1 register
+	ctrl1 = readRegister(RV3028_CTRL1);
+	if (ctrl1 == 0x00)
+    {
+        success = false;
+    }
+
+	ctrl1 &= ~(1 << CTRL1_EERD);
+	writeRegister(RV3028_CTRL1, ctrl1);
+	if (!waitforEEPROM()) 
+    {
+        success = false;
+    }
+
+	return success;
+}
+
+bool RV3028::readSingleByteFromUserEEPROM(uint8_t eeprom_address, uint8_t & read_data)
+{
+    //Make sure that the eeprom address requested by the user falls within the user eeprom
+    //according to the datasheet (section 3.16 of the datasehet, titled "USER EEPROM")
+    if (eeprom_address > RV3028_MAX_USER_EEPROM_ADDR)
+    {
+        return false;
+    }    
+
+	bool success = waitforEEPROM();
+
+	//Disable auto refresh by writing 1 to EERD control bit in CTRL1 register
+	uint8_t ctrl1 = readRegister(RV3028_CTRL1);
+	ctrl1 |= 1 << CTRL1_EERD;
+	if (!writeRegister(RV3028_CTRL1, ctrl1)) 
+    {
+        success = false;
+    }
+
+	//Indicate which EEPROM address we want to read by writing the address to the EEADDR register
+	writeRegister(RV3028_EEPROM_ADDR, eeprom_address);
+
+    //Write command 0x00 to the EECMD register
+    writeRegister(RV3028_EEPROM_CMD, EEPROMCMD_First);
+
+    //Write command 0x22 to the EECMD register
+    writeRegister(RV3028_EEPROM_CMD, EEPROMCMD_ReadSingle);
+
+    //Wait for the command to complete. According to section 4.6.6 of the datasheet, this should take ~1.4 ms.
+	if (!waitforEEPROM()) 
+    {
+        success = false;
+    }
+
+    //Read the data from the EEDATA register
+	read_data = readRegister(RV3028_EEPROM_DATA);
+
+	if (!waitforEEPROM()) 
+    {
+        success = false;
+    }
+
+	//Reenable auto refresh by writing 0 to EERD control bit in CTRL1 register
+	ctrl1 = readRegister(RV3028_CTRL1);
+	if (ctrl1 == 0x00)
+    {
+        success = false;
+    }
+
+	ctrl1 &= ~(1 << CTRL1_EERD);
+	writeRegister(RV3028_CTRL1, ctrl1);
+	if (!waitforEEPROM()) 
+    {
+        success = false;
+    }
+
+	return success;
+}
 
 void RV3028::setBit(uint8_t reg_addr, uint8_t bit_num)
 {

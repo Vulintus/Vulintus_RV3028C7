@@ -28,6 +28,8 @@ Distributed as-is; no warranty is given.
 #include <Wire.h>
 
 
+//Define the maximum address that can be written to in user EEPROM
+#define RV3028_MAX_USER_EEPROM_ADDR     0x2A
 
 //The 7-bit I2C ADDRESS of the RV3028
 #define RV3028_ADDR						(uint8_t)0x52
@@ -203,7 +205,7 @@ public:
 
 	RV3028(void);
 
-	bool begin(TwoWire &wirePort = Wire, bool set_24Hour = true, bool disable_TrickleCharge = true, bool set_LevelSwitchingMode = true, bool reset_Status = true);
+	bool begin(TwoWire &wirePort = Wire, bool set_24Hour = true, bool disable_TrickleCharge = true, bool set_LevelSwitchingMode = true);
 
 	bool setTime(uint8_t sec, uint8_t min, uint8_t hour, uint8_t weekday, uint8_t date, uint8_t month, uint16_t year);
 	bool setTime(uint8_t * time, uint8_t len);
@@ -215,6 +217,8 @@ public:
 	bool setMonth(uint8_t value);
 	bool setYear(uint16_t value);
 	bool setToCompilerTime(); //Uses the hours, mins, etc from compile time to set RTC
+
+    void getCompilerTime(uint8_t &seconds, uint8_t &minutes, uint8_t &hours, uint8_t &weekday, uint8_t &day_of_month, uint8_t &month, uint8_t &year);
 
 	bool updateTime(); //Update the local array with the RTC registers
 
@@ -283,10 +287,11 @@ public:
 
 	bool writeConfigEEPROM_RAMmirror(uint8_t eepromaddr, uint8_t val);
 	uint8_t readConfigEEPROM_RAMmirror(uint8_t eepromaddr);
-	bool writeUserEEPROM(uint8_t eepromaddr, uint8_t val);
-	uint8_t readUserEEPROM(uint8_t eepromaddr);
 	bool waitforEEPROM();
 	void reset();
+
+    bool writeSingleByteToUserEEPROM(uint8_t eeprom_address, uint8_t val);
+    bool readSingleByteFromUserEEPROM(uint8_t eeprom_address, uint8_t & read_data);
 
 	void setBit(uint8_t reg_addr, uint8_t bit_num);
 	void clearBit(uint8_t reg_addr, uint8_t bit_num);
